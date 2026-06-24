@@ -1,3 +1,5 @@
+pub mod solver;
+
 use std::fmt::{Display, Formatter, Write};
 use std::ops::{Index, IndexMut, Range};
 use std::path::Iter;
