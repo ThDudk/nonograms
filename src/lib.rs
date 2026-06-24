@@ -121,6 +121,10 @@ impl<'a> NonogramLine<'a> {
     pub fn iter(&self) -> ndarray::iter::Iter<'_, TileState, Ix1> {
         self.0.iter()
     }
+
+    pub fn get(&self, index: usize) -> Option<&TileState> {
+        self.0.get(index)
+    }
 }
 impl Index<usize> for NonogramLine<'_> {
     type Output = TileState;

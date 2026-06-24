@@ -14,7 +14,7 @@ enum ClueSpan {
     Multi(Vec<Range<usize>>),
 }
 impl ClueSpan {
-    fn single_range(&self) -> Option<&Range<usize>> {
+    fn continuous_range(&self) -> Option<&Range<usize>> {
         match self {
             ClueSpan::Filled { span, .. } | ClueSpan::Single(span) => Some(span),
             ClueSpan::Multi(_) => None,
@@ -84,6 +84,14 @@ impl Clue {
     }
     pub fn span(&self) -> &ClueSpan {
         &self.span
+    }
+
+    pub fn is_completed(&self) -> bool {
+        if let ClueSpan::Filled { filled_span, span } = &self.span {
+            filled_span.len() == span.len()
+        } else {
+            false
+        }
     }
 }
 
@@ -166,7 +174,7 @@ fn overlap_pass(ctx: &mut SolverCtx, clues: &Vec<Clue>) {
             );
         });
 }
-fn overlap_with_most_liberal_spans(ctx: &mut SolverCtx, line_len: usize, clues: &Vec<Clue>) {
+fn overlap_with_most_liberal_spans(ctx: &mut SolverCtx, line_len: usize, clues: &[Clue]) {
     let clue_spaces_sum: usize = clues.iter()
         .map(|clue| clue.len())
         .sum::<usize>()
@@ -186,7 +194,7 @@ fn overlap_with_most_liberal_spans(ctx: &mut SolverCtx, line_len: usize, clues: 
         .enumerate()
         .map(|(clue_idx, (liberal_span_range, clue))| (liberal_span_range, clue, clue_idx))
         .filter(|(liberal_span_range, clue, _clue_idx)| {
-            !clue.span.single_range().is_some_and(|range| {
+            !clue.span.continuous_range().is_some_and(|range| {
                 range.start >= liberal_span_range.start && range.end <= liberal_span_range.end
             })
         })
@@ -208,6 +216,24 @@ fn cross_tiles_with_no_spans(ctx: &mut SolverCtx, board_line: &NonogramLine, clu
                 ctx.cross_tile(pos_idx)
             }
         })
+}
+fn cross_next_to_completed(ctx: &mut SolverCtx, board_line: &NonogramLine, clues: &[Clue]) {
+    clues.iter()
+        .filter(|clue| clue.is_completed())
+        .for_each(|clue| {
+            let range = clue.span.continuous_range()
+                .expect("Since clue is completed, it must be Simple or Filled.");
+
+            let tile_before = (range.start > 0).then(|| &board_line[range.start - 1]); // closure so it does not underflow
+            let tile_after = board_line.get(range.end);
+
+            if let Some(&tile_state) = tile_before && tile_state != TileState::Crossed {
+                ctx.cross_tile(range.start - 1)
+            }
+            if let Some(&tile_state) = tile_after && tile_state != TileState::Crossed {
+                ctx.cross_tile(range.end)
+            }
+        });
 }
 
 #[cfg(test)]
@@ -447,6 +473,108 @@ mod tests {
             cross_tiles_with_no_spans(&mut context, &line, &clues_at_each_pos);
 
             assert!(context.actions.is_empty())
+        }
+    }
+    mod test_cross_next_to_completed {
+        use crate::TileState::{Empty, Filled};
+        use super::*;
+
+        #[test]
+        fn does_nothing_if_there_are_no_completed_spans() {
+            let clues = vec![
+                Clue{ len: 3, span: ClueSpan::Single(1..4) },
+            ];
+
+            let line = Array1::from_vec(vec![Empty; 5]);
+            let line = NonogramLine(line.view());
+
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
+
+            cross_next_to_completed(&mut context, &line, &clues);
+
+            // nothing should be done even though clues[0] fills the row
+            // because the clue is a single span, not filled (and thus not completed).
+            assert!(context.actions.is_empty())
+        }
+        #[test]
+        fn does_not_fill_left_of_line_bounds() {
+            let clues = vec![
+                Clue{
+                    len: 3,
+                    span: ClueSpan::Filled{ filled_span: 0..3, span: 0..3 }
+                },
+            ];
+
+            let line = Array1::from_vec(vec![Filled, Filled, Filled, Empty, Empty]);
+            let line = NonogramLine(line.view());
+
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
+
+            cross_next_to_completed(&mut context, &line, &clues);
+
+            assert_eq!(
+                vec![
+                    SolverAction::CrossTile(BoardIdx(0, 3))
+                ],
+                context.actions
+            );
+        }
+        #[test]
+        fn does_not_fill_right_of_line_bounds() {
+            let clues = vec![
+                Clue{
+                    len: 3,
+                    span: ClueSpan::Filled{ filled_span: 2..5, span: 2..5 }
+                },
+            ];
+
+            let line = Array1::from_vec(vec![Empty, Empty, Filled, Filled, Filled]);
+            let line = NonogramLine(line.view());
+
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
+
+            cross_next_to_completed(&mut context, &line, &clues);
+
+            assert_eq!(
+                vec![
+                    SolverAction::CrossTile(BoardIdx(0, 1))
+                ],
+                context.actions
+            );
+        }
+        #[test]
+        fn does_not_fill_out_of_line_bounds() {
+            let clues = vec![
+                Clue{
+                    len: 5,
+                    span: ClueSpan::Filled{ filled_span: 0..5, span: 0..5 }
+                },
+            ];
+
+            let line = Array1::from_vec(vec![Filled, Filled, Filled, Filled, Filled]);
+            let line = NonogramLine(line.view());
+
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
+
+            cross_next_to_completed(&mut context, &line, &clues);
+
+            assert!(context.actions.is_empty());
         }
     }
 }
