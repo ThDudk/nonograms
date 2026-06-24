@@ -21,6 +21,14 @@ impl ClueSpan {
         }
     }
 
+    fn is_filled_at(&self, idx: usize) -> bool {
+        if let ClueSpan::Filled { filled_span, .. } = self {
+            filled_span.contains(&idx)
+        } else {
+            false
+        }
+    }
+
     fn overlapped(&self, range: Range<usize>) -> Self {
         match self {
             ClueSpan::Filled { span, filled_span } => {
@@ -234,6 +242,21 @@ fn cross_next_to_completed(ctx: &mut SolverCtx, board_line: &NonogramLine, clues
                 ctx.cross_tile(range.end)
             }
         });
+}
+fn identify_filled_tiles_when_theres_one_span(ctx: &mut SolverCtx, board_line: &NonogramLine, clues: &[Clue], clues_at_each_position: &Vec<Vec<ClueIdx>>) {
+    clues_at_each_position.iter()
+        .enumerate()
+        .filter(|&(_idx, clue_indices)| clue_indices.len() == 1)
+        .filter(|&(idx, _clue_indices)| board_line[idx] != TileState::Filled )
+        .map(|(idx, clue_indices)| (idx, clue_indices[0]))
+        .for_each(|(idx, clue_idx)| {
+            debug_assert!(
+                !clues[clue_idx].span.is_filled_at(idx),
+                "if the board tile is empty, then the span at that position shouldn't be filled at that position."
+            );
+
+            ctx.fill_tile(idx, clue_idx)
+        })
 }
 
 #[cfg(test)]
@@ -575,6 +598,115 @@ mod tests {
             cross_next_to_completed(&mut context, &line, &clues);
 
             assert!(context.actions.is_empty());
+        }
+    }
+    mod test_identify_filled_tiles_when_theres_one_span {
+        use crate::TileState::{Empty, Filled};
+        use super::*;
+
+        #[test]
+        fn whole_line() {
+            let clues = vec![
+                Clue{ len: 5, span: ClueSpan::Single(0..5) }
+            ];
+            let clues_at_each_pos: Vec<Vec<ClueIdx>> = vec![
+                vec![0],
+                vec![0],
+                vec![0],
+                vec![0],
+                vec![0],
+            ];
+
+            let line = Array1::from_vec(vec![Empty; 5]);
+            let line = NonogramLine(line.view());
+
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
+
+            identify_filled_tiles_when_theres_one_span(&mut context, &line, &clues, &clues_at_each_pos);
+
+            assert_eq!(
+                vec![
+                    SolverAction::FillTile(BoardIdx(0, 0), 0),
+                    SolverAction::FillTile(BoardIdx(0, 1), 0),
+                    SolverAction::FillTile(BoardIdx(0, 2), 0),
+                    SolverAction::FillTile(BoardIdx(0, 3), 0),
+                    SolverAction::FillTile(BoardIdx(0, 4), 0),
+                ],
+                context.actions
+            )
+        }
+        #[test]
+        fn only_fills_tiles_with_one_option() {
+            let clues = vec![
+                Clue{ len: 1, span: ClueSpan::Single(0..3) },
+                Clue{ len: 1, span: ClueSpan::Single(2..5) },
+            ];
+            let clues_at_each_pos: Vec<Vec<ClueIdx>> = vec![
+                vec![0],
+                vec![0],
+                vec![0, 1],
+                vec![1],
+                vec![1],
+            ];
+
+            let line = Array1::from_vec(vec![Empty; 5]);
+            let line = NonogramLine(line.view());
+
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
+
+            identify_filled_tiles_when_theres_one_span(&mut context, &line, &clues, &clues_at_each_pos);
+
+            assert_eq!(
+                vec![
+                    SolverAction::FillTile(BoardIdx(0, 0), 0),
+                    SolverAction::FillTile(BoardIdx(0, 1), 0),
+                    SolverAction::FillTile(BoardIdx(0, 3), 1),
+                    SolverAction::FillTile(BoardIdx(0, 4), 1),
+                ],
+                context.actions
+            )
+        }
+        #[test]
+        fn handles_multi_ranges() {
+            let clues = vec![
+                Clue{ len: 1, span: ClueSpan::Multi(vec![0..1, 2..4]) },
+                Clue{ len: 1, span: ClueSpan::Single(3..5) },
+            ];
+            let clues_at_each_pos: Vec<Vec<ClueIdx>> = vec![
+                vec![0],
+                vec![],
+                vec![0],
+                vec![0, 1],
+                vec![1],
+            ];
+
+            let line = Array1::from_vec(vec![Empty; 5]);
+            let line = NonogramLine(line.view());
+
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
+
+            identify_filled_tiles_when_theres_one_span(&mut context, &line, &clues, &clues_at_each_pos);
+
+            assert_eq!(
+                vec![
+                    SolverAction::FillTile(BoardIdx(0, 0), 0),
+                    SolverAction::FillTile(BoardIdx(0, 2), 0),
+                    SolverAction::FillTile(BoardIdx(0, 4), 1),
+                ],
+                context.actions
+            )
         }
     }
 }
