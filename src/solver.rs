@@ -1,7 +1,6 @@
+use crate::{BoardIdx, LineDir, LineRange, NonogramLine, TileState};
 use std::cmp;
-use crate::{BoardIdx, LineDir, LineRange, NonogramBoard, NonogramClues, NonogramLine};
 use std::ops::{Add, Range};
-use rand::fill;
 
 type ClueIdx = usize;
 
@@ -107,8 +106,8 @@ enum SolverAction {
     UpdateClueSpan(ClueSpan, ClueIdx),
     FillTile(BoardIdx, ClueIdx),
     FillRange(LineRange, ClueIdx),
-    CrossTile(BoardIdx, ClueIdx),
-    CrossRange(LineRange, ClueIdx),
+    CrossTile(BoardIdx),
+    CrossRange(LineRange),
 }
 struct SolverCtx {
     line_dir: LineDir,
@@ -116,17 +115,34 @@ struct SolverCtx {
     actions: Vec<SolverAction>,
 }
 impl SolverCtx {
+    fn to_board_idx(&self, idx_along: usize) -> BoardIdx {
+        BoardIdx::directional(self.line_dir, idx_along, self.line_idx)
+    }
+    fn to_line_range(&self, range: Range<usize>) -> LineRange {
+        LineRange::new(self.line_dir, self.line_idx, range)
+    }
+
     fn update_clue_span(&mut self, new_span: ClueSpan, clue_idx: ClueIdx) {
         self.actions.push(SolverAction::UpdateClueSpan(new_span, clue_idx))
     }
     fn fill_tile(&mut self, idx: usize, clue_idx: ClueIdx) {
-        let tile = BoardIdx::directional(self.line_dir, idx, self.line_idx);
+        let tile = self.to_board_idx(idx);
         let action = SolverAction::FillTile(tile, clue_idx);
         self.actions.push(action);
     }
     fn fill_range(&mut self, range: Range<usize>, clue_idx: ClueIdx) {
-        let tile = LineRange::new(self.line_dir, self.line_idx, range);
-        let action = SolverAction::FillRange(tile, clue_idx);
+        let range = self.to_line_range(range);
+        let action = SolverAction::FillRange(range, clue_idx);
+        self.actions.push(action);
+    }
+    fn cross_tile(&mut self, idx: usize) {
+        let tile = self.to_board_idx(idx);
+        let action = SolverAction::CrossTile(tile);
+        self.actions.push(action);
+    }
+    fn cross_range(&mut self, range: Range<usize>) {
+        let range = self.to_line_range(range);
+        let action = SolverAction::CrossRange(range);
         self.actions.push(action);
     }
 }
@@ -182,151 +198,255 @@ fn overlap_with_most_liberal_spans(ctx: &mut SolverCtx, line_len: usize, clues: 
             ctx.update_clue_span(new_span, clue_idx)
         });
 }
+fn cross_tiles_with_no_spans(ctx: &mut SolverCtx, board_line: &NonogramLine, clues_at_each_position: &Vec<Vec<ClueIdx>>) {
+    clues_at_each_position.iter().enumerate()
+        .filter(|&(_pos_idx, _clues)|
+            board_line[_pos_idx] != TileState::Crossed
+        )
+        .for_each(|(pos_idx, clues)| {
+            if clues.len() == 0 {
+                ctx.cross_tile(pos_idx)
+            }
+        })
+}
 
 #[cfg(test)]
 mod tests {
+    use ndarray::Array1;
     use super::*;
-    use crate::{NonogramBoard, TileState};
-    use ndarray::Array2;
-    use TileState::Filled;
 
-    #[test]
-    fn test_complete_overlap() {
-        let clues = vec![
-            Clue{ len: 5, span: ClueSpan::Single(0..5) }
-        ];
+    mod test_overlap {
+        use super::*;
 
-        let mut context = SolverCtx {
-            line_dir: LineDir::Row,
-            line_idx: 0,
-            actions: vec![],
-        };
+        #[test]
+        fn full() {
+            let clues = vec![
+                Clue{ len: 5, span: ClueSpan::Single(0..5) }
+            ];
 
-        overlap_pass(&mut context, &clues);
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
 
-        assert_eq!(
-            vec![
-                SolverAction::FillRange(
-                    LineRange::new(LineDir::Row, 0, 0..5),
-                    0
-                ),
-            ],
-            context.actions
-        )
+            overlap_pass(&mut context, &clues);
+
+            assert_eq!(
+                vec![
+                    SolverAction::FillRange(
+                        LineRange::new(LineDir::Row, 0, 0..5),
+                        0
+                    ),
+                ],
+                context.actions
+            )
+        }
+        #[test]
+        fn partial() {
+            let clues = vec![
+                Clue{ len: 3, span: ClueSpan::Single(0..5) }
+            ];
+
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
+
+            overlap_pass(&mut context, &clues);
+
+            assert_eq!(
+                vec![
+                    SolverAction::FillRange(
+                        LineRange::new(LineDir::Row, 0, 2..3),
+                        0
+                    ),
+                ],
+                context.actions
+            )
+        }
     }
-    #[test]
-    fn test_partial_overlap() {
-        let clues = vec![
-            Clue{ len: 3, span: ClueSpan::Single(0..5) }
-        ];
+    mod test_overlap_with_most_liberal_spans {
+        use super::*;
 
-        let mut context = SolverCtx {
-            line_dir: LineDir::Row,
-            line_idx: 0,
-            actions: vec![],
-        };
+        #[test]
+        fn single_spans() {
+            let clues = vec![
+                Clue{ len: 2, span: ClueSpan::Single(0..5) },
+                Clue{ len: 2, span: ClueSpan::Single(0..5) },
+            ];
 
-        overlap_pass(&mut context, &clues);
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
 
-        assert_eq!(
-            vec![
-                SolverAction::FillRange(
-                    LineRange::new(LineDir::Row, 0, 2..3),
-                    0
-                ),
-            ],
-            context.actions
-        )
+            overlap_with_most_liberal_spans(&mut context, 5, &clues);
+
+            assert_eq!(
+                vec![
+                    SolverAction::UpdateClueSpan(
+                        ClueSpan::Single(Range::from(0..2)),
+                        0
+                    ),
+                    SolverAction::UpdateClueSpan(
+                        ClueSpan::Single(Range::from(3..5)),
+                        1
+                    ),
+                ],
+                context.actions
+            )
+        }
+        #[test]
+        fn multi_spans() {
+            let clues = vec![
+                Clue{ len: 1, span: ClueSpan::Multi(vec![0..1, 2..3]) },
+                Clue{ len: 1, span: ClueSpan::Multi(vec![0..1, 2..3]) },
+            ];
+
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
+
+            overlap_with_most_liberal_spans(&mut context, 3, &clues);
+
+            assert_eq!(
+                vec![
+                    SolverAction::UpdateClueSpan(
+                        ClueSpan::Single(Range::from(0..1)),
+                        0
+                    ),
+                    SolverAction::UpdateClueSpan(
+                        ClueSpan::Single(Range::from(2..3)),
+                        1
+                    ),
+                ],
+                context.actions
+            )
+        }
+        #[test]
+        fn mix_of_spans() {
+            // aaBaCCC
+            // aa
+            //   BB
+            //     CCC
+
+            let clues = vec![
+                Clue{ len: 1, span: ClueSpan::Multi(vec![0..2, 3..4]) },
+                Clue{ len: 1, span: ClueSpan::Filled{ filled_span: 2..3, span: 2..3 } },
+                Clue{ len: 2, span: ClueSpan::Filled { filled_span: 5..6, span: 4..7 } },
+            ];
+
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
+
+            overlap_with_most_liberal_spans(&mut context, 7, &clues);
+
+            assert_eq!(
+                vec![
+                    SolverAction::UpdateClueSpan(
+                        ClueSpan::Single(Range::from(0..2)), // Note: this is unintuitively 0..2 NOT 0..1
+                        0
+                    ),
+                    // no update for B
+                    // no update for C
+                ],
+                context.actions
+            )
+        }
     }
-    #[test]
-    fn test_overlap_with_most_liberal_spans() {
-        let clues = vec![
-            Clue{ len: 2, span: ClueSpan::Single(0..5) },
-            Clue{ len: 2, span: ClueSpan::Single(0..5) },
-        ];
+    mod test_cross_tiles_with_no_spans {
+        use ndarray::Array1;
+        use TileState::Empty;
+        use crate::solver::{cross_tiles_with_no_spans, ClueIdx, SolverAction, SolverCtx};
+        use crate::{BoardIdx, LineDir, NonogramLine, TileState};
+        use crate::TileState::Crossed;
 
-        let mut context = SolverCtx {
-            line_dir: LineDir::Row,
-            line_idx: 0,
-            actions: vec![],
-        };
+        #[test]
+        fn simple() {
+            // 2, 2 : 00X11
+            let clues_at_each_pos: Vec<Vec<ClueIdx>> = vec![
+                vec![0],
+                vec![0],
+                vec![],
+                vec![1],
+                vec![1],
+            ];
 
-        overlap_with_most_liberal_spans(&mut context, 5, &clues);
+            let line = Array1::from_vec(vec![Empty; 5]);
+            let line = NonogramLine(line.view());
 
-        assert_eq!(
-            vec![
-                SolverAction::UpdateClueSpan(
-                    ClueSpan::Single(Range::from(0..2)),
-                    0
-                ),
-                SolverAction::UpdateClueSpan(
-                    ClueSpan::Single(Range::from(3..5)),
-                    1
-                ),
-            ],
-            context.actions
-        )
-    }
-    #[test]
-    fn test_overlap_with_most_liberal_spans_when_multi_spans_are_involved() {
-        let clues = vec![
-            Clue{ len: 1, span: ClueSpan::Multi(vec![0..1, 2..3]) },
-            Clue{ len: 1, span: ClueSpan::Multi(vec![0..1, 2..3]) },
-        ];
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
 
-        let mut context = SolverCtx {
-            line_dir: LineDir::Row,
-            line_idx: 0,
-            actions: vec![],
-        };
+            cross_tiles_with_no_spans(&mut context, &line, &clues_at_each_pos);
 
-        overlap_with_most_liberal_spans(&mut context, 3, &clues);
+            assert_eq!(
+                vec![
+                    SolverAction::CrossTile(
+                        BoardIdx(0, 2)
+                    ),
+                ],
+                context.actions
+            )
+        }
+        #[test]
+        fn no_matches() {
+            // 1, 1 : 00(01)11
+            let clues_at_each_pos: Vec<Vec<ClueIdx>> = vec![
+                vec![0],
+                vec![0],
+                vec![0, 1],
+                vec![1],
+                vec![1],
+            ];
 
-        assert_eq!(
-            vec![
-                SolverAction::UpdateClueSpan(
-                    ClueSpan::Single(Range::from(0..1)),
-                    0
-                ),
-                SolverAction::UpdateClueSpan(
-                    ClueSpan::Single(Range::from(2..3)),
-                    1
-                ),
-            ],
-            context.actions
-        )
-    }
-    #[test]
-    fn test_overlap_with_most_liberal_spans_with_a_mix_of_spans() {
-        // aaBaCCC
-        // aa
-        //   BB
-        //     CCC
+            let line = Array1::from_vec(vec![Empty; 5]);
+            let line = NonogramLine(line.view());
 
-        let clues = vec![
-            Clue{ len: 1, span: ClueSpan::Multi(vec![0..2, 3..4]) },
-            Clue{ len: 1, span: ClueSpan::Filled{ filled_span: 2..3, span: 2..3 } },
-            Clue{ len: 2, span: ClueSpan::Filled { filled_span: 5..6, span: 4..7 } },
-        ];
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
 
-        let mut context = SolverCtx {
-            line_dir: LineDir::Row,
-            line_idx: 0,
-            actions: vec![],
-        };
+            cross_tiles_with_no_spans(&mut context, &line, &clues_at_each_pos);
 
-        overlap_with_most_liberal_spans(&mut context, 7, &clues);
+            assert!(context.actions.is_empty())
+        }
+        #[test]
+        fn already_filled() {
+            // 2, 2 : 00X11
+            let clues_at_each_pos: Vec<Vec<ClueIdx>> = vec![
+                vec![0],
+                vec![0],
+                vec![],
+                vec![1],
+                vec![1],
+            ];
 
-        assert_eq!(
-            vec![
-                SolverAction::UpdateClueSpan(
-                    ClueSpan::Single(Range::from(0..2)), // Note: this is unintuitively 0..2 NOT 0..1
-                    0
-                ),
-                // no update for B
-                // no update for C
-            ],
-            context.actions
-        )
+            let line = Array1::from_vec(vec![Empty, Empty, Crossed, Empty, Empty]);
+            let line = NonogramLine(line.view());
+
+            let mut context = SolverCtx {
+                line_dir: LineDir::Row,
+                line_idx: 0,
+                actions: vec![],
+            };
+
+            cross_tiles_with_no_spans(&mut context, &line, &clues_at_each_pos);
+
+            assert!(context.actions.is_empty())
+        }
     }
 }

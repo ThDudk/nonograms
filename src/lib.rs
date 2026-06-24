@@ -1,11 +1,8 @@
 pub mod solver;
 
-use std::fmt::{Display, Formatter, Write};
-use std::ops::{Index, IndexMut, Range};
-use std::path::Iter;
-use std::process::Output;
-use ndarray::{Array2, ArrayBase, ArrayView1, ArrayView2, Ix1};
+use ndarray::{Array2, ArrayView1, Ix1};
 use serde::{Deserialize, Serialize};
+use std::ops::{Index, Range};
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct NonogramClues {
@@ -123,5 +120,12 @@ pub struct NonogramLine<'a>(ArrayView1<'a, TileState>);
 impl<'a> NonogramLine<'a> {
     pub fn iter(&self) -> ndarray::iter::Iter<'_, TileState, Ix1> {
         self.0.iter()
+    }
+}
+impl Index<usize> for NonogramLine<'_> {
+    type Output = TileState;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
     }
 }
