@@ -2,7 +2,7 @@ pub mod solver;
 
 use ndarray::{Array2, ArrayView1, Ix1};
 use serde::{Deserialize, Serialize};
-use std::ops::{Index, Range};
+use std::ops::{Index, IndexMut, Range};
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct NonogramClues {
@@ -51,11 +51,27 @@ pub enum TileState {
     Filled
 }
 
+#[derive(Eq, PartialEq, Debug)]
 pub struct NonogramBoard(Array2<TileState>);
 impl NonogramBoard {
     pub fn new(matrix: Array2<TileState>) -> Self {
         Self(matrix)
     }
+    pub fn from_binary_array((nrows, ncols): (usize, usize), binary_array: Vec<bool>) -> Self {
+        let tile_state_vec = binary_array.into_iter()
+            .map(|state|
+                match state {
+                    true => TileState::Filled,
+                    false => TileState::Empty,
+                }
+            ).collect();
+
+        Self::new(
+            Array2::from_shape_vec((nrows, ncols), tile_state_vec)
+                .expect("binary array should have length: nrows * ncols.")
+        )
+    }
+
     pub fn rows(&'_ self) -> impl Iterator<Item = NonogramLine<'_>> {
         (0..self.0.nrows()).map(|idx| self.row(idx))
     }
@@ -69,6 +85,10 @@ impl NonogramBoard {
         NonogramLine(self.0.column(idx))
     }
 
+    pub fn map(&mut self, mapper: impl Fn(&TileState) -> TileState) {
+        self.0 = self.0.map(mapper)
+    }
+
     pub fn clues(&self) -> NonogramClues {
         NonogramClues {
             row_clues: self.rows().map(NonogramClues::count_clues).collect(),
@@ -76,10 +96,31 @@ impl NonogramBoard {
         }
     }
 }
+impl Index<BoardIdx> for NonogramBoard {
+    type Output = TileState;
+
+    fn index(&self, index: BoardIdx) -> &Self::Output {
+        &self.0[(index.row(), index.col())]
+    }
+}
+impl IndexMut<BoardIdx> for NonogramBoard {
+    fn index_mut(&mut self, index: BoardIdx) -> &mut Self::Output {
+        &mut self.0[(index.row(), index.col())]
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LineDir { Row, Col }
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl LineDir {
+    pub fn perp(&self) -> LineDir {
+        match self {
+            LineDir::Row => LineDir::Col,
+            LineDir::Col => LineDir::Row,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct BoardIdx(usize, usize);
 impl BoardIdx {
     fn new(row: usize, col: usize) -> Self {
@@ -97,6 +138,12 @@ impl BoardIdx {
     fn col(&self) -> usize {
         self.1
     }
+    fn in_dir(&self, dir: LineDir) -> usize {
+        match dir {
+            LineDir::Row => self.row(),
+            LineDir::Col => self.col(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -113,9 +160,21 @@ impl LineRange {
             range_along,
         }
     }
+
+    pub fn start(&self) -> BoardIdx {
+        BoardIdx::directional(self.dir, self.range_along.start, self.line_idx)
+    }
+    pub fn end(&self) -> BoardIdx {
+        BoardIdx::directional(self.dir, self.range_along.end, self.line_idx)
+    }
+    pub fn iter(&self) -> impl Iterator<Item = BoardIdx> {
+        self.range_along.clone()
+            .map(|idx_along| BoardIdx::directional(self.dir, idx_along, self.line_idx))
+    }
+
 }
 
-
+#[derive(Debug)]
 pub struct NonogramLine<'a>(ArrayView1<'a, TileState>);
 impl<'a> NonogramLine<'a> {
     pub fn iter(&self) -> ndarray::iter::Iter<'_, TileState, Ix1> {
@@ -124,6 +183,10 @@ impl<'a> NonogramLine<'a> {
 
     pub fn get(&self, index: usize) -> Option<&TileState> {
         self.0.get(index)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.iter().len()
     }
 }
 impl Index<usize> for NonogramLine<'_> {
