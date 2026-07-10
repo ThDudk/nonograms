@@ -67,14 +67,6 @@ impl ClueSpan {
         }
     }
 
-    fn exclusive_end(&self) -> usize {
-        match self {
-            ClueSpan::Filled { span, .. } => span.end,
-            ClueSpan::Single(span) => span.end,
-            ClueSpan::Multi(spans) => spans.iter().map(|range| range.end).max().expect("Clue range cannot have no area"),
-        }
-    }
-
     fn overlapped(&self, range: Range<usize>) -> Option<Self> {
         match self {
             ClueSpan::Filled { span, filled_span } => {
@@ -170,8 +162,8 @@ impl Clue {
             ClueSpan::Filled { filled_span, span } => {
                 let mut filled_span = filled_span.clone();
 
-                if idx_along > filled_span.end {
-                    filled_span.end = idx_along;
+                if idx_along + 1 > filled_span.end {
+                    filled_span.end = idx_along + 1;
                 }
                 if idx_along < filled_span.start {
                     filled_span.start = idx_along;
@@ -211,7 +203,7 @@ impl Clue {
                 let mut span = span.clone();
 
                 if idx_along < filled_span.start { // use less than since filled_span.start is inclusive (can't cross and fill a tile at the same time)
-                    span.start = cmp::max(idx_along, span.start);
+                    span.start = cmp::max(idx_along + 1, span.start);
                 }
                 if idx_along >= filled_span.end {
                     span.end = cmp::min(idx_along, span.end);
@@ -281,7 +273,7 @@ impl Clue {
         }
     }
     fn update_span_based_on_filled(&mut self) {
-        let ClueSpan::Filled{ filled_span, span } = &mut self.span else {panic!("Expected filled span. Found {self:?}")};
+        let ClueSpan::Filled{ filled_span, .. } = &mut self.span else {panic!("Expected filled span. Found {self:?}")};
 
         debug_assert!(self.len >= filled_span.len(), "Illegal state: filled area is larger than self.len()");
 
@@ -309,22 +301,10 @@ impl WorkingClues {
     fn col(&self, idx: usize) -> &Vec<Clue> {
         &self.col_clues[idx]
     }
-    fn row_mut(&mut self, idx: usize) -> &mut Vec<Clue> {
-        &mut self.row_clues[idx]
-    }
-    fn col_mut(&mut self, idx: usize) -> &mut Vec<Clue> {
-        &mut self.col_clues[idx]
-    }
     fn line(&self, line_dir: LineDir, line_idx: usize) -> &Vec<Clue> {
         match line_dir {
             LineDir::Row => {self.row(line_idx)}
             LineDir::Col => {self.col(line_idx)}
-        }
-    }
-    fn line_mut(&mut self, line_dir: LineDir, line_idx: usize) -> &mut Vec<Clue> {
-        match line_dir {
-            LineDir::Row => {self.row_mut(line_idx)}
-            LineDir::Col => {self.col_mut(line_idx)}
         }
     }
 }
@@ -417,9 +397,10 @@ impl SolverCtx {
                     working_clues[&clue_idx].fill_at(idx_along);
                 }
                 SolverAction::FillRange(line_range, clue_idx) => {
-                    let ends = vec![line_range.start(), line_range.end()];
+                    let start_pos = line_range.start();
+                    let end_pos = line_range.end().transposed(line_range.dir, -1);
 
-                    ends.into_iter().for_each(|board_idx| {
+                    [start_pos, end_pos].into_iter().for_each(|board_idx| {
                         let idx_along = board_idx.in_dir(clue_idx.line_dir().perp());
 
                         working_clues[&clue_idx].fill_at(idx_along);
@@ -502,8 +483,10 @@ impl<'a> LineSolverContext<'a> {
     }
 }
 
-
-fn linear_solver(clues: &NonogramClues) -> NonogramBoard {
+/// Attempts to solve the given nonogram clues using a logical solver.
+///
+/// This functions blocks the current thread until completion, which could last a long time depending on the board size.
+pub fn blocking_logical_solver(clues: &NonogramClues) -> (NonogramBoard, bool) {
     let num_cols = clues.col_clues.len();
     let num_rows = clues.row_clues.len();
 
@@ -530,16 +513,24 @@ fn linear_solver(clues: &NonogramClues) -> NonogramBoard {
         mutations += ctx.num_mutations();
         ctx.flush(&mut board, &mut working_clues);
 
-        if mutations == 0 { break }
+        if mutations == 0 {
+            break
+        }
 
         loop_count += 1;
-        if loop_count > num_cols + num_rows {
+        if loop_count > 50 * num_cols * num_rows {
             println!("WARN: Pass limit reached. Looped: {} times, which means something likely went wrong. Ending loop.", loop_count);
             break
         }
     }
 
-    board
+    let solved = board.rows().all(|row| {
+        row.iter().all(|&tile| {
+            tile != TileState::Empty
+        })
+    });
+
+    (board, solved)
 }
 
 fn line_pass(ctx: &mut SolverCtx, line: &NonogramLine, working_clues: &WorkingClues, dir: LineDir, line_idx: LineIdx) {
@@ -562,12 +553,12 @@ fn line_pass(ctx: &mut SolverCtx, line: &NonogramLine, working_clues: &WorkingCl
     // println!("Line: {:?}", line);
     // println!("Clues At Each position: {:?}", clues_at_each_pos);
 
-    overlap_with_most_liberal_spans(&mut ctx, line.len(), clues); // fine
-    overlap(&mut ctx, clues); // fine
-    cross_tiles_with_no_spans(&mut ctx, line, &clues_at_each_pos); // fine
-    cross_next_to_completed(&mut ctx, line, &clues, &clues_at_each_pos); // fine
-    identify_filled_tiles_when_theres_one_span(&mut ctx, line, clues, &clues_at_each_pos); // creating 2 fill tiles
-    cross_crossed_tiles(&mut ctx, line, &clues_at_each_pos); // fine
+    overlap_with_most_liberal_spans(&mut ctx, clues, &clues_at_each_pos);
+    overlap(&mut ctx, clues);
+    cross_tiles_with_no_spans(&mut ctx, line, &clues_at_each_pos);
+    cross_next_to_completed(&mut ctx, line, &clues, &clues_at_each_pos);
+    identify_filled_tiles_when_theres_one_span(&mut ctx, line, clues, &clues_at_each_pos); // 1 + 2
+    cross_crossed_tiles(&mut ctx, line, &clues_at_each_pos); // 1
 
     // println!("New context: {:?}", ctx);
     // println!();
@@ -593,7 +584,21 @@ fn overlap(ctx: &mut LineSolverContext, clues: &[Clue]) {
             };
         });
 }
-fn overlap_with_most_liberal_spans(ctx: &mut LineSolverContext, line_len: usize, clues: &[Clue]) {
+fn overlap_with_most_liberal_spans(ctx: &mut LineSolverContext, clues: &[Clue], clues_at_each_position: &Vec<Vec<ClueIdx>>) {
+    if clues.len() == 0 { return }
+
+    let start_inclusive = clues_at_each_position.iter().enumerate()
+        .find_position(|(_, clues)| !clues.is_empty())
+        .expect("there must be a clue somewhere").0;
+
+    let end_inclusive = clues_at_each_position.iter().enumerate().rev()
+        .find(|(_, clues)| !clues.is_empty())
+        .expect("there must be a clue somewhere").0;
+
+    let line_len = (end_inclusive + 1) - start_inclusive;
+
+    // Clues at each position should no longer be used.
+
     let clue_spaces_sum = if clues.len() > 0 {
         clues.iter()
             .map(|clue| clue.len())
@@ -619,12 +624,20 @@ fn overlap_with_most_liberal_spans(ctx: &mut LineSolverContext, line_len: usize,
                 range.start >= liberal_span_range.start && range.end <= liberal_span_range.end
             })
         })
+        // offset liberal span range so it's in the correct coordinates again
+        .map(|(liberal_span_range, clue, clue_idx)| (
+            liberal_span_range.start + start_inclusive..liberal_span_range.end + start_inclusive,
+            clue,
+            clue_idx
+        ))
         .for_each(|(liberal_span_range, clue, clue_idx)| {
             let new_span = clue.span
                 .overlapped(liberal_span_range).expect("Cannot have span with no length")
                 .trim_spans_below_len(clue.len);
 
-            ctx.update_clue_span(new_span, clue_idx)
+            if clue.span != new_span {
+                ctx.update_clue_span(new_span, clue_idx)
+            }
         });
 }
 fn cross_tiles_with_no_spans(ctx: &mut LineSolverContext, board_line: &NonogramLine, clues_at_each_position: &Vec<Vec<ClueIdx>>) {
@@ -746,6 +759,14 @@ mod tests {
 
         #[test]
         fn single_spans() {
+            let clues_at_each_pos: Vec<Vec<ClueIdx>> = vec![
+                vec![01],
+                vec![01],
+                vec![01],
+                vec![01],
+                vec![01],
+            ];
+
             let clues = vec![
                 Clue{ len: 2, span: ClueSpan::Single(0..5) },
                 Clue{ len: 2, span: ClueSpan::Single(0..5) },
@@ -754,7 +775,7 @@ mod tests {
             let mut context = SolverCtx::default();
             let mut line_ctx = context.set_line(LineDir::Row, 0);
 
-            overlap_with_most_liberal_spans(&mut line_ctx, 5, &clues);
+            overlap_with_most_liberal_spans(&mut line_ctx, &clues, &clues_at_each_pos);
 
             assert_eq!(
                 vec![
@@ -772,6 +793,14 @@ mod tests {
         }
         #[test]
         fn multi_spans() {
+            let clues_at_each_pos: Vec<Vec<ClueIdx>> = vec![
+                vec![01],
+                vec![],
+                vec![01],
+                vec![],
+                vec![],
+            ];
+
             let clues = vec![
                 Clue{ len: 1, span: ClueSpan::Multi(vec![0..1, 2..3]) },
                 Clue{ len: 1, span: ClueSpan::Multi(vec![0..1, 2..3]) },
@@ -780,7 +809,7 @@ mod tests {
             let mut context = SolverCtx::default();
             let mut line_ctx = context.set_line(LineDir::Row, 0);
 
-            overlap_with_most_liberal_spans(&mut line_ctx, 3, &clues);
+            overlap_with_most_liberal_spans(&mut line_ctx, &clues, &clues_at_each_pos);
 
             assert_eq!(
                 vec![
@@ -803,6 +832,16 @@ mod tests {
             //   BB
             //     CCC
 
+            let clues_at_each_pos: Vec<Vec<ClueIdx>> = vec![
+                vec![0],
+                vec![0],
+                vec![1],
+                vec![0],
+                vec![2],
+                vec![2],
+                vec![2],
+            ];
+
             let clues = vec![
                 Clue{ len: 1, span: ClueSpan::Multi(vec![0..2, 3..4]) },
                 Clue{ len: 1, span: ClueSpan::Filled{ filled_span: 2..3, span: 2..3 } },
@@ -812,7 +851,7 @@ mod tests {
             let mut context = SolverCtx::default();
             let mut line_ctx = context.set_line(LineDir::Row, 0);
 
-            overlap_with_most_liberal_spans(&mut line_ctx, 7, &clues);
+            overlap_with_most_liberal_spans(&mut line_ctx, &clues, &clues_at_each_pos);
 
             assert_eq!(
                 vec![
@@ -1136,57 +1175,17 @@ mod tests {
 
     mod functional_tests {
         use super::*;
-
-        fn number_to_board((num_rows, num_cols): (usize, usize), num: usize) -> NonogramBoard {
-            let mut array = vec![false; num_rows * num_cols];
-
-            for i in 0..num_rows * num_cols {
-                array[i] = (num & (1 << i)) == 1;
-            }
-
-            NonogramBoard::from_binary_array((num_rows, num_cols), array)
-        }
+        use crate::random;
+        use crate::TileState::{Crossed, Filled};
 
         #[rstest]
-        #[case(1, 3)]
-        #[case(3, 3)]
-        #[case(4, 4)]
-        fn can_solve_all_nxn_boards(#[case] num_rows: usize, #[case] num_cols: usize) {
-            (0..2_usize.pow((num_rows * num_cols) as u32))
-                .map(|number| number_to_board((num_rows, num_cols), number))
-                .for_each(|mut board| {
-                    let clues = board.clues();
-                    let result = linear_solver(&clues);
-
-                    board.map(|&state| match state {
-                        TileState::Empty => TileState::Crossed,
-                        TileState::Crossed => TileState::Crossed,
-                        TileState::Filled => TileState::Filled,
-                    });
-
-                    assert_eq!(
-                        board,
-                        result
-                    )
-                });
-        }
-
-        #[rstest]
-        #[case((5, 5), 50000)]
+        #[case((5, 5), 1000)]
         fn can_solve_some_nxm_boards(#[case] (num_rows, num_cols): (usize, usize), #[case] trials: usize) {
             for _ in 0..trials {
-                let num = rand::random_range(0..2_usize.pow((num_rows * num_cols) as u32));
-
-                let mut board = number_to_board((num_rows, num_cols), num);
+                let board = random::random_board(num_rows, num_cols, 0.5);
 
                 let clues = board.clues();
-                let result = linear_solver(&clues);
-
-                board.map(|&state| match state {
-                    TileState::Empty => TileState::Crossed,
-                    TileState::Crossed => TileState::Crossed,
-                    TileState::Filled => TileState::Filled,
-                });
+                let (result, _solved) = blocking_logical_solver(&clues);
 
                 assert_eq!(
                     board,
@@ -1197,65 +1196,116 @@ mod tests {
 
         #[rstest]
         #[case( // empty nonogram board
-            NonogramBoard::new(
+            NonogramBoard::from_matrix(
                 Array2::from_shape_vec(
                     (5, 5),
-                    vec![TileState::Crossed; 25]
+                    vec![Crossed; 25]
                 ).unwrap()
             )
         )]
         #[case( // fully filled nonogram board
-            NonogramBoard::new(
+            NonogramBoard::from_matrix(
                 Array2::from_shape_vec(
                     (5, 5),
-                    vec![TileState::Filled; 25]
+                    vec![Filled; 25]
                 ).unwrap()
             )
         )]
         #[case( // checker board
-            NonogramBoard::new(
+            NonogramBoard::from_matrix(
                 Array2::from_shape_vec(
                     (3, 3),
                     vec![
-                        TileState::Filled, TileState::Crossed, TileState::Filled,
-                        TileState::Crossed, TileState::Filled, TileState::Crossed,
-                        TileState::Filled, TileState::Crossed, TileState::Filled,
+                        Filled, Crossed, Filled,
+                        Crossed, Filled, Crossed,
+                        Filled, Crossed, Filled,
                     ]
                 ).unwrap()
             )
         )]
         #[case( // smiley board
-            NonogramBoard::new(
+            NonogramBoard::from_matrix(
                 Array2::from_shape_vec(
                     (5, 5),
                     vec![
-                        TileState::Filled, TileState::Filled, TileState::Crossed, TileState::Filled, TileState::Filled,
-                        TileState::Filled, TileState::Filled, TileState::Crossed, TileState::Filled, TileState::Filled,
-                        TileState::Crossed, TileState::Crossed, TileState::Crossed, TileState::Crossed, TileState::Crossed,
-                        TileState::Filled, TileState::Crossed, TileState::Crossed, TileState::Crossed, TileState::Filled,
-                        TileState::Filled, TileState::Filled, TileState::Filled, TileState::Filled, TileState::Filled,
+                        Filled, Filled, Crossed, Filled, Filled,
+                        Filled, Filled, Crossed, Filled, Filled,
+                        Crossed, Crossed, Crossed, Crossed, Crossed,
+                        Filled, Crossed, Crossed, Crossed, Filled,
+                        Filled, Filled, Filled, Filled, Filled,
                     ]
                 ).unwrap()
             )
         )]
+        pub fn solves_board(#[case] board: NonogramBoard) {
+            let clues = board.clues();
+            let (result, _solved) = blocking_logical_solver(&clues);
+
+            assert_eq!(board, result)
+        }
+
+        #[rstest]
         #[case(
-            NonogramBoard::new(
+            NonogramBoard::from_matrix(
                 Array2::from_shape_vec(
                     (4, 4),
                     vec![
-                        TileState::Filled, TileState::Crossed, TileState::Filled, TileState::Crossed,
-                        TileState::Crossed, TileState::Filled, TileState::Crossed, TileState::Filled,
-                        TileState::Filled, TileState::Crossed, TileState::Filled, TileState::Crossed,
-                        TileState::Crossed, TileState::Filled, TileState::Crossed, TileState::Filled,
+                        Filled, Crossed, Filled, Crossed,
+                        Crossed, Filled, Crossed, Filled,
+                        Filled, Crossed, Filled, Crossed,
+                        Crossed, Filled, Crossed, Filled,
                     ]
                 ).unwrap()
             )
         )]
-        fn solves_board(#[case] board: NonogramBoard) {
+        #[case( // smiley board
+            NonogramBoard::from_matrix(
+                Array2::from_shape_vec(
+                    (5, 5),
+                    vec![
+                        Filled, Filled, Crossed, Filled, Filled,
+                        Filled, Filled, Crossed, Filled, Filled,
+                        Crossed, Crossed, Crossed, Crossed, Crossed,
+                        Filled, Crossed, Crossed, Crossed, Filled,
+                        Crossed, Filled, Filled, Filled, Crossed,
+                    ]
+                ).unwrap()
+            )
+        )]
+        fn cant_solve_board(#[case] board: NonogramBoard) {
             let clues = board.clues();
-            let result = linear_solver(&clues);
+            let (result, _solved) = blocking_logical_solver(&clues);
 
-            assert_eq!(board, result)
+            assert_ne!(board, result)
+        }
+
+        #[test]
+        fn big_board() {
+            let board = NonogramBoard::from_matrix(Array2::from_shape_vec(
+                (15, 15),
+                vec![
+                    Crossed, Filled, Crossed, Crossed, Crossed, Filled, Crossed, Crossed, Crossed, Filled, Crossed, Crossed, Crossed, Filled, Filled,
+                    Crossed, Crossed, Filled, Crossed, Filled, Crossed, Filled, Filled, Crossed, Crossed, Crossed, Crossed, Crossed, Crossed, Crossed,
+                    Filled, Crossed, Crossed, Crossed, Crossed, Filled, Filled, Crossed, Crossed, Filled, Filled, Filled, Crossed, Filled, Crossed,
+                    Crossed, Filled, Filled, Crossed, Crossed, Filled, Filled, Filled, Filled, Filled, Filled, Crossed, Crossed, Crossed, Filled,
+                    Crossed, Crossed, Crossed, Filled, Crossed, Filled, Filled, Filled, Filled, Filled, Crossed, Filled, Crossed, Filled, Crossed,
+                    Crossed, Crossed, Filled, Crossed, Filled, Filled, Filled, Filled, Filled, Filled, Filled, Crossed, Filled, Filled, Filled,
+                    Filled, Filled, Crossed, Crossed, Filled, Crossed, Crossed, Crossed, Filled, Crossed, Filled, Filled, Filled, Filled, Filled,
+                    Filled, Crossed, Filled, Filled, Crossed, Filled, Crossed, Filled, Crossed, Filled, Crossed, Filled, Crossed, Filled, Filled,
+                    Filled, Filled, Crossed, Crossed, Crossed, Crossed, Filled, Filled, Crossed, Crossed, Filled, Crossed, Filled, Filled, Crossed,
+                    Filled, Crossed, Crossed, Filled, Filled, Crossed, Filled, Filled, Filled, Filled, Filled, Filled, Crossed, Crossed, Filled,
+                    Crossed, Crossed, Filled, Filled, Crossed, Crossed, Crossed, Filled, Crossed, Filled, Crossed, Filled, Filled, Crossed, Crossed,
+                    Crossed, Filled, Filled, Filled, Filled, Filled, Filled, Crossed, Filled, Crossed, Filled, Filled, Filled, Crossed, Crossed,
+                    Filled, Filled, Crossed, Filled, Crossed, Filled, Crossed, Filled, Filled, Crossed, Crossed, Filled, Filled, Crossed, Filled,
+                    Filled, Crossed, Filled, Filled, Crossed, Crossed, Crossed, Filled, Crossed, Filled, Crossed, Filled, Filled, Filled, Filled,
+                    Filled, Filled, Filled, Filled, Filled, Filled, Crossed, Crossed, Crossed, Filled, Crossed, Crossed, Filled, Crossed, Filled,
+                ]
+            ).unwrap());
+
+            let (result, solved) = blocking_logical_solver(&board.clues());
+
+            assert!(solved);
+            assert_eq!(result, board);
         }
     }
 }

@@ -1,6 +1,55 @@
-pub mod solver;
+//! # Rust nonograms
+//!
+//! This crate provides 3 primary features:
+//! - A structure to represent nonogram puzzles
+//! - A logical solver which is significantly faster than similar crates
+//! - Random puzzle generation (including generating solvable puzzles)
+//!
+//! # Usage
+//!
+//! TODO
+//!
+//! # Example: Generating a random, solvable board
+//!
+//! ```
+//! use nonograms::{random, NonogramBoard};
+//!
+//! let result = random::try_generate_solvable_board(3, 15, 15, 0.5);
+//! if let Ok(board) = result {
+//!     println!("{board}");
+//! }
+//! ```
+//!
+//! # Example: Using the logical solver
+//!
+//! ```
+//! use nonograms::{random, solver, NonogramBoard};
+//!
+//! let result = random::try_generate_solvable_board(10, 15, 15, 0.9);
+//!
+//! if let Ok(board) = result {
+//!     let nonogram_clues = board.clues();
+//!
+//!     let (solved_board, was_solved) = solver::blocking_logical_solver(&nonogram_clues);
+//!
+//!     assert!(was_solved);
+//!     assert_eq!(board, solved_board);
+//! }
+//! ```
+//!
+//! # Async
+//!
+//! TODO
+//!
+//! # Performance
+//!
+//! TODO
 
-use ndarray::{Array2, ArrayView1, Ix1};
+pub mod solver;
+pub mod random;
+
+use std::fmt::{Display, Formatter, Write};
+use ndarray::{Array2, ArrayBase, ArrayView1, Ix1, Ix2, OwnedRepr};
 use serde::{Deserialize, Serialize};
 use std::ops::{Index, IndexMut, Range};
 
@@ -54,24 +103,45 @@ pub enum TileState {
 #[derive(Eq, PartialEq, Debug)]
 pub struct NonogramBoard(Array2<TileState>);
 impl NonogramBoard {
-    pub fn new(matrix: Array2<TileState>) -> Self {
+    pub fn from_row_major(width: usize, height: usize, array: Vec<TileState>) -> Self {
+        assert_ne!(width, 0, "Width cannot be 0");
+        assert_ne!(height, 0, "Height cannot be 0");
+        assert_eq!(width * height, array.len(), "Array length does not match width and height.");
+
+        let matrix = Array2::from_shape_vec((height, width), array);
+
+        Self::from_matrix(
+            matrix.expect("Invalid array.")
+        )
+    }
+    pub fn from_2d_vec(array: Vec<Vec<TileState>>) -> Self {
+        let rows = array.len();
+        let cols = array.get(0).map(|row| row.len()).unwrap_or(0);
+
+        Self::from_row_major(cols, rows, array.into_iter().flatten().collect())
+    }
+    pub(crate) fn from_matrix(matrix: ArrayBase<OwnedRepr<TileState>, Ix2>) -> Self {
         Self(matrix)
     }
-    pub fn from_binary_array((nrows, ncols): (usize, usize), binary_array: Vec<bool>) -> Self {
+    pub(crate) fn from_binary_array((nrows, ncols): (usize, usize), binary_array: Vec<bool>) -> Self {
+        assert_ne!(nrows, 0, "Cannot have 0 rows.");
+        assert_ne!(ncols, 0, "Cannot have 0 columns.");
+
         let tile_state_vec = binary_array.into_iter()
             .map(|state|
                 match state {
                     true => TileState::Filled,
-                    false => TileState::Empty,
+                    false => TileState::Crossed,
                 }
             ).collect();
 
-        Self::new(
+        Self::from_matrix(
             Array2::from_shape_vec((nrows, ncols), tile_state_vec)
                 .expect("binary array should have length: nrows * ncols.")
         )
     }
 
+    /// # Returns
     pub fn rows(&'_ self) -> impl Iterator<Item = NonogramLine<'_>> {
         (0..self.0.nrows()).map(|idx| self.row(idx))
     }
@@ -106,6 +176,24 @@ impl Index<BoardIdx> for NonogramBoard {
 impl IndexMut<BoardIdx> for NonogramBoard {
     fn index_mut(&mut self, index: BoardIdx) -> &mut Self::Output {
         &mut self.0[(index.row(), index.col())]
+    }
+}
+impl Display for NonogramBoard {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for row in self.rows() {
+            for tile in row.iter() {
+                let char = match tile {
+                    TileState::Empty => '□',
+                    TileState::Crossed => '☒',
+                    TileState::Filled => '■',
+                };
+                f.write_char(char)?;
+                f.write_char(' ')?;
+            }
+            write!(f, "\n")?;
+        }
+
+        Ok(())
     }
 }
 
@@ -143,6 +231,19 @@ impl BoardIdx {
             LineDir::Row => self.row(),
             LineDir::Col => self.col(),
         }
+    }
+    fn transposed(mut self, dir: LineDir, dist: i64) -> Self {
+        match dir {
+            LineDir::Row => {
+                let col = self.1;
+                self.1 = (col as i64 + dist) as usize;
+            }
+            LineDir::Col => {
+                let row = self.0;
+                self.0 = (row as i64 + dist) as usize;
+            }
+        }
+        self
     }
 }
 
@@ -194,5 +295,29 @@ impl Index<usize> for NonogramLine<'_> {
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use crate::NonogramBoard;
+    use crate::TileState::{Empty, Filled, Crossed};
+
+    #[rstest]
+    #[case(
+        NonogramBoard::from_row_major(
+            3, 3,
+            vec![
+                Filled, Filled, Empty,
+                Crossed, Filled, Filled,
+                Filled, Empty, Filled,
+            ]
+        ),
+        "■ ■ □ \n☒ ■ ■ \n■ □ ■ \n"
+    )]
+    fn test_display(#[case] board: NonogramBoard, #[case] str: &'static str) {
+        let string = format!("{board}");
+        assert_eq!(string, str);
     }
 }
