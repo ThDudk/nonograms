@@ -3,11 +3,14 @@ name = "nonograms"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+serde = ["dep:serde", "ndarray/serde"]
+
 [dependencies]
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"], optional = true}
 rand = "0.10.1"
 itertools = "0.15.0"
-ndarray = { version = "0.17.2", features = ["serde"] }
+ndarray = { version = "0.17.2" }
 
 [dev-dependencies]
 rstest = "0.26.1"

@@ -5,10 +5,6 @@
 //! - A logical solver which is significantly faster than similar crates
 //! - Random puzzle generation (including generating solvable puzzles)
 //!
-//! # Usage
-//!
-//! TODO
-//!
 //! # Example: Generating a random, solvable board
 //!
 //! ```
@@ -36,23 +32,18 @@
 //!     assert_eq!(board, solved_board);
 //! }
 //! ```
-//!
-//! # Async
-//!
-//! TODO
-//!
-//! # Performance
-//!
-//! TODO
 
 pub mod solver;
 pub mod random;
 
 use std::fmt::{Display, Formatter, Write};
 use ndarray::{Array2, ArrayBase, ArrayView1, Ix1, Ix2, OwnedRepr};
-use serde::{Deserialize, Serialize};
 use std::ops::{Index, IndexMut, Range};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Eq, Debug)]
 pub struct NonogramClues {
     pub row_clues: Vec<Vec<usize>>,
@@ -92,7 +83,8 @@ impl NonogramClues {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum TileState {
     #[default]
     Empty,
@@ -100,6 +92,7 @@ pub enum TileState {
     Filled
 }
 
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Eq, PartialEq, Debug)]
 pub struct NonogramBoard(Array2<TileState>);
 impl NonogramBoard {
@@ -155,10 +148,6 @@ impl NonogramBoard {
         NonogramLine(self.0.column(idx))
     }
 
-    pub fn map(&mut self, mapper: impl Fn(&TileState) -> TileState) {
-        self.0 = self.0.map(mapper)
-    }
-
     pub fn clues(&self) -> NonogramClues {
         NonogramClues {
             row_clues: self.rows().map(NonogramClues::count_clues).collect(),
@@ -198,7 +187,7 @@ impl Display for NonogramBoard {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LineDir { Row, Col }
+pub enum LineDir { Row, Col }
 impl LineDir {
     pub fn perp(&self) -> LineDir {
         match self {
@@ -209,30 +198,30 @@ impl LineDir {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct BoardIdx(usize, usize);
+pub struct BoardIdx(usize, usize);
 impl BoardIdx {
-    fn new(row: usize, col: usize) -> Self {
+    pub fn new(row: usize, col: usize) -> Self {
         Self(row, col)
     }
-    fn directional(dir: LineDir, idx_along: usize, idx_perp: usize) -> Self {
+    pub fn directional(dir: LineDir, idx_along: usize, idx_perp: usize) -> Self {
         match dir {
             LineDir::Row => Self::new(idx_perp, idx_along),
             LineDir::Col => Self::new(idx_along, idx_perp),
         }
     }
-    fn row(&self) -> usize {
+    pub fn row(&self) -> usize {
         self.0
     }
-    fn col(&self) -> usize {
+    pub fn col(&self) -> usize {
         self.1
     }
-    fn in_dir(&self, dir: LineDir) -> usize {
+    pub fn in_dir(&self, dir: LineDir) -> usize {
         match dir {
             LineDir::Row => self.row(),
             LineDir::Col => self.col(),
         }
     }
-    fn transposed(mut self, dir: LineDir, dist: i64) -> Self {
+    pub fn transposed(mut self, dir: LineDir, dist: i64) -> Self {
         match dir {
             LineDir::Row => {
                 let col = self.1;
@@ -275,6 +264,7 @@ impl LineRange {
 
 }
 
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct NonogramLine<'a>(ArrayView1<'a, TileState>);
 impl<'a> NonogramLine<'a> {
