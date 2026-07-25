@@ -99,6 +99,9 @@ impl NonogramBoard { // TODO make NonogramBoard more strict in the size of the b
     pub fn empty_square(side_len: usize) -> Self {
         Self::from_matrix(Array2::default((side_len, side_len)))
     }
+    pub fn empty(num_rows: usize, num_cols: usize) -> Self {
+        Self::from_matrix(Array2::default((num_rows, num_cols)))
+    }
     pub fn from_row_major(width: usize, height: usize, array: Vec<TileState>) -> Self {
         assert_ne!(width, 0, "Width cannot be 0");
         assert_ne!(height, 0, "Height cannot be 0");
@@ -326,6 +329,15 @@ mod tests {
         let board = NonogramBoard::empty_square(5);
 
         assert_eq!(5, board.width());
+        assert_eq!(5, board.height());
+
+        assert!(board.rows().all(|row| row.iter().all(|tile| *tile == Empty)))
+    }
+    #[test]
+    fn test_empty() {
+        let board = NonogramBoard::empty(5, 6);
+
+        assert_eq!(6, board.width());
         assert_eq!(5, board.height());
 
         assert!(board.rows().all(|row| row.iter().all(|tile| *tile == Empty)))

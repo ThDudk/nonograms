@@ -490,8 +490,7 @@ pub fn blocking_logical_solver(clues: &NonogramClues) -> (NonogramBoard, bool) {
     let num_cols = clues.col_clues.len();
     let num_rows = clues.row_clues.len();
 
-    let array = Array2::from_elem((num_rows, num_cols), TileState::Empty);
-    let mut board = NonogramBoard(array);
+    let mut board = NonogramBoard::empty(num_rows, num_cols);
 
     let mut working_clues: WorkingClues = clues.into();
 
