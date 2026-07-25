@@ -96,6 +96,9 @@ pub enum TileState {
 #[derive(Eq, PartialEq, Debug)]
 pub struct NonogramBoard(Array2<TileState>);
 impl NonogramBoard { // TODO make NonogramBoard more strict in the size of the board (should be in u32)
+    pub fn empty_square(side_len: usize) -> Self {
+        Self::from_matrix(Array2::default((side_len, side_len)))
+    }
     pub fn from_row_major(width: usize, height: usize, array: Vec<TileState>) -> Self {
         assert_ne!(width, 0, "Width cannot be 0");
         assert_ne!(height, 0, "Height cannot be 0");
@@ -298,7 +301,7 @@ impl Index<usize> for NonogramLine<'_> {
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
-    use crate::NonogramBoard;
+    use crate::{NonogramBoard, TileState};
     use crate::TileState::{Empty, Filled, Crossed};
 
     #[rstest]
@@ -316,5 +319,15 @@ mod tests {
     fn test_display(#[case] board: NonogramBoard, #[case] str: &'static str) {
         let string = format!("{board}");
         assert_eq!(string, str);
+    }
+
+    #[test]
+    fn test_empty_square() {
+        let board = NonogramBoard::empty_square(5);
+
+        assert_eq!(5, board.width());
+        assert_eq!(5, board.height());
+
+        assert!(board.rows().all(|row| row.iter().all(|tile| *tile == Empty)))
     }
 }
