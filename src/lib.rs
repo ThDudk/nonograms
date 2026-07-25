@@ -95,7 +95,7 @@ pub enum TileState {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Eq, PartialEq, Debug)]
 pub struct NonogramBoard(Array2<TileState>);
-impl NonogramBoard {
+impl NonogramBoard { // TODO make NonogramBoard more strict in the size of the board (should be in u32)
     pub fn from_row_major(width: usize, height: usize, array: Vec<TileState>) -> Self {
         assert_ne!(width, 0, "Width cannot be 0");
         assert_ne!(height, 0, "Height cannot be 0");
@@ -146,6 +146,13 @@ impl NonogramBoard {
     }
     pub fn col(&'_ self, idx: usize) -> NonogramLine<'_> {
         NonogramLine(self.0.column(idx))
+    }
+
+    pub fn width(&self) -> u32 {
+        self.0.ncols() as u32
+    }
+    pub fn height(&self) -> u32 {
+        self.0.nrows() as u32
     }
 
     pub fn clues(&self) -> NonogramClues {

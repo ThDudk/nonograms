@@ -533,6 +533,8 @@ pub fn blocking_logical_solver(clues: &NonogramClues) -> (NonogramBoard, bool) {
     (board, solved)
 }
 
+// TODO async solver
+
 fn line_pass(ctx: &mut SolverCtx, line: &NonogramLine, working_clues: &WorkingClues, dir: LineDir, line_idx: LineIdx) {
     let mut ctx = ctx.set_line(dir, line_idx);
 
