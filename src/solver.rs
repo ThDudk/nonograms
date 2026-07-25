@@ -549,19 +549,12 @@ fn line_pass(ctx: &mut SolverCtx, line: &NonogramLine, working_clues: &WorkingCl
         clues_at_each_pos.push(clues_at_pos)
     }
 
-    // println!("Starting pass on {:?} {:?}:", dir, line_idx);
-    // println!("Line: {:?}", line);
-    // println!("Clues At Each position: {:?}", clues_at_each_pos);
-
     overlap_with_most_liberal_spans(&mut ctx, clues, &clues_at_each_pos);
     overlap(&mut ctx, clues);
     cross_tiles_with_no_spans(&mut ctx, line, &clues_at_each_pos);
     cross_next_to_completed(&mut ctx, line, &clues, &clues_at_each_pos);
-    identify_filled_tiles_when_theres_one_span(&mut ctx, line, clues, &clues_at_each_pos); // 1 + 2
-    cross_crossed_tiles(&mut ctx, line, &clues_at_each_pos); // 1
-
-    // println!("New context: {:?}", ctx);
-    // println!();
+    identify_filled_tiles_when_theres_one_span(&mut ctx, line, clues, &clues_at_each_pos);
+    cross_crossed_tiles(&mut ctx, line, &clues_at_each_pos);
 }
 
 fn overlap(ctx: &mut LineSolverContext, clues: &[Clue]) {
