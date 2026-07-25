@@ -179,7 +179,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nonograms"
+name = "nonogram-solver"
 version = "0.1.0"
 dependencies = [
  "itertools",

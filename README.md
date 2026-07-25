@@ -1,4 +1,4 @@
-# Rust nonograms
+# Rust Nonogram Solver
 
 This crate provides 3 primary features:
 - A structure to represent nonogram puzzles
