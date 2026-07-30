@@ -1,4 +1,4 @@
-use std::cmp::max;
+use rand::random;
 use crate::NonogramBoard;
 
 /// Generates a random `width` x `height` nonogram board.
@@ -27,19 +27,15 @@ pub fn random_board(num_rows: usize, num_cols: usize, density: f64) -> NonogramB
 
 // TODO maybe a board iterator that stores whether it's solvable?
 
-pub enum GenerationError {
-    ExceededMaxAttempts
-}
-
-pub fn try_generate_solvable_board(max_attempts: u8, num_rows: usize, num_cols: usize, density: f64) -> Result<NonogramBoard, GenerationError> {
+pub fn try_generate_solvable_board(max_attempts: u8, num_rows: usize, num_cols: usize, density: f64) -> Option<NonogramBoard> {
     for _ in 0..max_attempts {
         let board = random_board(num_rows, num_cols, density);
 
         let (_, solved) = crate::solver::blocking_logical_solver(&board.clues());
-        if solved { return Ok(board); }
+        if solved { return Some(board); }
     }
 
-    Err(GenerationError::ExceededMaxAttempts)
+    None
 }
 
 #[cfg(test)]
@@ -47,6 +43,7 @@ mod tests {
     use super::*;
     use crate::TileState;
     use rstest::rstest;
+    use std::time::Instant;
 
     #[rstest]
     #[case(1000, 10000, 0.5, 0.001, 3)]
@@ -79,5 +76,16 @@ mod tests {
     #[should_panic] #[case(10, 10, 500.)]
     fn test_panics(#[case] width: usize, #[case] height: usize, #[case] density: f64) {
         random_board(width, height, density);
+    }
+
+    #[test]
+    fn benchmark() {
+        let start_time = Instant::now();
+
+        let board = try_generate_solvable_board(100, 25, 25, 0.5);
+
+        let time_spent = Instant::now() - start_time;
+
+        println!("Generated solvable board in {} milliseconds. Succeeded?: {:?}", time_spent.as_millis(), board.is_some());
     }
 }

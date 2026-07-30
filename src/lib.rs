@@ -36,6 +36,10 @@
 pub mod solver;
 pub mod random;
 
+pub use solver::blocking_logical_solver;
+pub use random::try_generate_solvable_board;
+pub use random::random_board;
+
 use std::fmt::{Display, Formatter, Write};
 use ndarray::{Array2, ArrayBase, ArrayView1, Ix1, Ix2, OwnedRepr};
 use std::ops::{Index, IndexMut, Range};
@@ -210,6 +214,9 @@ impl LineDir {
     }
 }
 
+/// Position of a tile in the NonogramBoard.
+///
+/// Self.0 is the row, and self.1 is the column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoardIdx(usize, usize);
 impl BoardIdx {
