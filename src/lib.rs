@@ -284,7 +284,6 @@ impl LineRange {
 
 }
 
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct NonogramLine<'a>(ArrayView1<'a, TileState>);
 impl<'a> NonogramLine<'a> {

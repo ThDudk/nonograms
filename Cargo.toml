@@ -10,7 +10,7 @@ serde = ["dep:serde", "ndarray/serde"]
 serde = { version = "1.0.228", features = ["derive"], optional = true}
 rand = "0.10.1"
 itertools = "0.15.0"
-ndarray = { version = "0.17.2" }
+ndarray = { version = "0.17.2", features = ["serde"] }
 
 [dev-dependencies]
 rstest = "0.26.1"
